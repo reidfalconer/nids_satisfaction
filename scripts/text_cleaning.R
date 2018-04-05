@@ -32,10 +32,16 @@ df$walls <- str_replace_all(df$walls, fixed(" "), "_")
 df$walls <- str_replace_all(df$walls, fixed("/"), "_")
 df$walls <- str_replace_all(df$walls, fixed("-"), "") 
 df$marital <- str_replace_all(df$marital, fixed("-"), "") 
-df$marital <- str_replace_all(df$marital, fixed(" "), "") 
+df$marital <- str_replace_all(df$marital, fixed(" "), "_") 
 df$marital <- str_replace_all(df$marital, fixed("/"), "") 
-
-
+df$rank1 <- str_replace_all(df$rank1, fixed(" "), "_") 
+df$rank1 <- str_replace_all(df$rank1, fixed(":"), "") 
+df$rank2 <- str_replace_all(df$rank2, fixed(" "), "_") 
+df$rank2 <- str_replace_all(df$rank2, fixed(":"), "") 
+df$rank3 <- str_replace_all(df$rank3, fixed(" "), "_") 
+df$rank3 <- str_replace_all(df$rank3, fixed(":"), "") 
+df$rank4 <- str_replace_all(df$rank4, fixed(" "), "_") 
+df$rank4 <- str_replace_all(df$rank4, fixed(":"), "") 
 
 
 

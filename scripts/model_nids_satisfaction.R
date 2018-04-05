@@ -42,7 +42,9 @@ source("scripts/text_cleaning.R")
 
 # create new df for modelling %>% convert all factors to dummies 
 df_new <- df %>% 
+  mutate(id = pid) %>% 
   mutate(satisfactions = factor(satisfaction)) %>% 
+  mutate(satisfactions = as.numeric(satisfactions)) %>% 
   mutate(income = (hhincome)) %>% 
   mutate(members = hhsize) %>% 
   mutate(room = rooms) %>% 
@@ -116,14 +118,12 @@ df_new <- df %>%
 
 # Full data set with test and training from rulof
 df_full <- df_new %>% 
-  select(satisfactions:exercises, shock1:shock12) 
+  select(id:exercises, shock1:shock12) 
 
 # Data set of only training subset 
 df <- df_full %>% 
+  select(-id) %>% 
   drop_na(satisfactions) 
-
-glimpse(df)
-sapply(df, class)
 
 
 # TRAIN-TEST SPLIT AND CV FOLDS ====
@@ -140,9 +140,8 @@ train <- df %>% dplyr::slice(train_index)
 test <- df %>% dplyr::slice(-train_index) 
 
 # Define training control. 10-fold cross-validation 
-
 cv <- createFolds(train$satisfactions, k = 10)
-train_control <- trainControl(method = "cv", number =  5, verboseIter = T, allowParallel = T)
+# train_control <- trainControl(method = "cv", number =  5, verboseIter = T, allowParallel = T)
 
 # MODELLING ====
 
@@ -165,23 +164,28 @@ params <- list(booster = 'gbtree',
                colsample_bytree = 1)
 
 # preform cross-validated gboost to get the best iteration
-xgboost.cv <-  xgb.cv(param = params, 
+xgboost_cv <-  xgb.cv(param = params, 
                       data = dtrain, 
                       folds = cv, 
-                      nrounds = 1500, 
+                      nrounds = 2000, 
                       early_stopping_rounds = 100, 
                       metrics = 'rmse',
                       verbose = TRUE,
                       prediction = TRUE)
 
-best_iteration = xgboost.cv$best_iteration #1091
+best_iteration = xgboost.cv$best_iteration #1310
 
 # Out-of-Fold Prediction Error
 # use max.col() to assign the family that has the highest probability
 oof_pred <- xgboost.cv$pred %>% 
-  data.frame() %>%
+  data.frame()
+  
+oof_pred <- oof_pred %>% 
   mutate(satisfcation_pred = round(xgboost.cv$pred)) %>% 
   mutate(satisfcation_true = as.numeric(train$satisfactions))
+
+oof_pred$satisfcation_pred[oof_pred$satisfcation_pred == 0] <- 1 
+oof_pred$satisfcation_pred[oof_pred$satisfcation_pred == 11] <- 10 
 head(oof_pred)
 
 accuracy(oof_pred$satisfcation_true, oof_pred$satisfcation_pred)
@@ -194,7 +198,7 @@ mod_xgb <- xgb.train(data = dtrain,
                      nrounds = best_iteration)
 
 # load xgb model form file path
-#mod_xgb <- xgb.load("models/xgb_job_family_classifier_v0.0.0.RDS")
+#mod_xgb <- xgb.load("models/xgb_nids_satisfaction_predictor_v0.0.0.RDS")
 mod_xgb
 
 
@@ -204,15 +208,18 @@ mod_xgb
 # use max.col() to assign the family that has the highest probability
 test_prediction <- predict(mod_xgb, newdata = dtest) %>% 
   matrix(nrow = dim(dtest)[1], byrow = T) %>% 
-  data.frame() %>% 
+  data.frame() 
+
+test_prediction <- test_prediction %>% 
   mutate(satisfcation_pred = round(test_prediction$.)) %>% 
   mutate(satisfcation_true = (test$satisfactions))
-head(test_prediction)
 
+test_prediction$satisfcation_pred[test_prediction$satisfcation_pred == 0] <- 1 
+test_prediction$satisfcation_pred[test_prediction$satisfcation_pred == 11] <- 10 
+head(test_prediction)
 
 # confusion matrix of test set and accuracy
 accuracy(as.numeric(test_prediction$satisfcation_true), test_prediction$satisfcation_pred)
-#confusionMatrix(test_prediction$satisfcation_true, test_prediction$satisfcation_pred)
 
 #> Feature importance ----
 
@@ -229,7 +236,56 @@ importance_matrix <- xgb.importance(names, model = mod_xgb)
 xgb.plot.importance(importance_matrix[0:50] )
 
 
+# EXPORT MODEL ====
 
+# save the model for future using
+xgb.save(mod_xgb,"models/xgb_nids_satisfaction_predictor_v0.0.0.RDS")
+
+
+# PREDICTIONS ON REAL DATA ====
+
+# LOAD NEW DATA & WRANGLE ====
+
+#read data into new_df
+
+new_df <- df_full %>% 
+  filter(is.na(satisfactions)) %>% 
+  select(-satisfactions)
+
+# prepare the train and test matrices for xgboost.
+dtest_new <- xgb.DMatrix(data = new_df %>% select(-id) %>% data.matrix(), 
+                         missing = NA)
+
+# PREDICTIONS ON REAL DATA ====
+
+# Predict on real dataset.
+# use max.col() to assign the family that has the highest probability
+real_prediction <- predict(mod_xgb, newdata = dtest_new) %>%
+  matrix(nrow = dim(dtest_new)[1], byrow = T) %>%
+  data.frame() 
+
+real_prediction <- real_prediction %>% 
+  mutate(pred = round(real_prediction$.))
+
+real_prediction$pred[real_prediction$pred == 0] <- 1
+real_prediction$pred[real_prediction$pred == 11] <- 10
+head(real_prediction)
+
+#attach predictions to dataset
+new_df$prediction <- real_prediction$pred
+
+# drop the  components that are not needed
+new_df <- new_df %>% select(id, prediction)
+
+# tabulate classes
+table(new_df$prediction)
+
+write.csv(new_df, "xgboost_pred.csv",row.names=F)
+
+# SAVE FINAL DATA ====
+
+# save the dataset to be taken across to Harambee dashboard repository.
+#saveRDS(new_df,"data/processed/cleaned_nids.RDS")
 
 
 
